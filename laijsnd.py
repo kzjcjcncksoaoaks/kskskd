@@ -12,8 +12,6 @@ from aiogram.fsm.state import StatesGroup, State
 
 from assets.transform import transform_int as tr
 from assets.antispam import antispam, antispam_earning, new_earning, admin_only
-from commands.main import CONFIG as HELLO_CONFIG
-from commands.help import CONFIG as HELP_CONFIG
 from user import BFGuser
 
 
@@ -130,17 +128,7 @@ class Database:
         self.conn.commit()
 
 
-def edit_event_message():
-    HELLO_CONFIG['sticker_id'] = [
-        'CAACAgIAAxkBAAENUydnXbenashbCQpIjm2xRtZkAyywcgACZRQAAhMdSUryE1c7F5PylTYE',
-        'CAACAgQAAxkBAAENZhtnbv18pHlf1XpB7gfY7K3-Luc_gQACvhAAAhihOFCGYokJ7qckjDYE',
-        'CAACAgIAAxkBAAENZh1nbv4IOnvS3gABWYUI87luDn3kHgUAAncBAAIiN44EAAHKirUTyZWxNgQ',
-    ]
-    
-    HELLO_CONFIG['hello_text'] = HELLO_CONFIG['hello_text'].replace('🤖', '☃️').replace('💙', '🎄')
-    HELLO_CONFIG['hello_text2'] = HELLO_CONFIG['hello_text2'].replace('🚀', '🎅')
-    HELP_CONFIG['help_cmd'] = HELP_CONFIG['help_cmd'].replace('💬', '🎅')
-    HELP_CONFIG['help_osn'] += '\n   🎁 Календарь'
+# Удалена функция edit_event_message() которая меняла конфиги
 
 
 # Инициализация базы данных
@@ -198,7 +186,7 @@ async def event_calendar_cmd(message: Message, user: BFGuser):
             return
         
         msg = await message.answer(
-            f'<b>{user.url}, сегодняшний подарок </b>(<code>{day}</code>/<code>30</code>)</b>: {tr(prize[1])} {prize[2]}', 
+            f'<b>{user.url}, сегодняшний подарок </b>(<code>{day}</code>/<code>14</code>)</b>: {tr(prize[1])} {prize[2]}', 
             reply_markup=get_prize_kb()
         )
         await new_earning(msg)
@@ -364,7 +352,7 @@ async def summ_state_handler(message: Message, state: FSMContext):
 
 def register_handlers(dp):
     dp.include_router(router)
-    edit_event_message()
+    # Убрано edit_event_message() чтобы не менять конфиги
 
 
 MODULE_DESCRIPTION = {
