@@ -1,6 +1,8 @@
 import asyncio
 from datetime import datetime
 import sqlite3
+import os
+from pathlib import Path
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -18,7 +20,6 @@ from user import BFGuser
 class SetSummState(StatesGroup):
     summ = State()
 
-#/loadmodb https://raw.githubusercontent.com/Ijidishurka/bfg-modules/refs/heads/main/events/14_february.py
 
 DEFOULT_PRIZES = {
     1: ['balance', 1_000_000_000_000, '💰 Денег'],
@@ -59,7 +60,12 @@ PRIZES_CONFIG = {
 
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('modules/temp/winter_calendar.db')
+        # Создаем директорию если её нет
+        db_dir = Path('modules/temp')
+        db_dir.mkdir(parents=True, exist_ok=True)
+        
+        db_path = db_dir / 'winter_calendar.db'
+        self.conn = sqlite3.connect(str(db_path))
         self.cursor = self.conn.cursor()
         self.create_tables()
     
@@ -137,6 +143,7 @@ def edit_event_message():
     HELP_CONFIG['help_osn'] += '\n   🎁 Календарь'
 
 
+# Инициализация базы данных
 db = Database()
 
 
@@ -181,84 +188,99 @@ def edit_prizes_kb(day) -> InlineKeyboardMarkup:
 
 @antispam
 async def event_calendar_cmd(message: Message, user: BFGuser):
-    day = await db.get_day()
-    prize = await db.get_prizes()
-    prize = prize.get(day)
-    
-    if not prize:
-        await message.answer(f'<b>{user.url}, месяц подарков к концу! Возвращайтесь в следующем году 🎅</b>')
-        return
-    
-    msg = await message.answer(
-        f'<b>{user.url}, сегодняшний подарок </b>(<code>{day}</code>/<code>30</code>)</b>: {tr(prize[1])} {prize[2]}', 
-        reply_markup=get_prize_kb()
-    )
-    await new_earning(msg)
+    try:
+        day = await db.get_day()
+        prize = await db.get_prizes()
+        prize = prize.get(day)
+        
+        if not prize:
+            await message.answer(f'<b>{user.url}, месяц подарков к концу! Возвращайтесь в следующем году 🎅</b>')
+            return
+        
+        msg = await message.answer(
+            f'<b>{user.url}, сегодняшний подарок </b>(<code>{day}</code>/<code>30</code>)</b>: {tr(prize[1])} {prize[2]}', 
+            reply_markup=get_prize_kb()
+        )
+        await new_earning(msg)
+    except Exception as e:
+        await message.answer(f'❌ Ошибка при получении календаря: {str(e)}')
 
 
 @antispam_earning
 async def event_calendar_call(call: CallbackQuery, user: BFGuser):
-    day = await db.get_day()
-    user_day = await db.get_user_day(user.user_id)
-    prize = await db.get_prizes()
-    prize = prize.get(day)
+    try:
+        day = await db.get_day()
+        user_day = await db.get_user_day(user.user_id)
+        prize = await db.get_prizes()
+        prize = prize.get(day)
 
-    if user_day >= day or not prize:
-        await call.answer(f'<b>{user.name}, Вы уже забрали свой подарок сегодня! 🎅</b>')
-        return
+        if user_day >= day or not prize:
+            await call.answer(f'<b>{user.name}, Вы уже забрали свой подарок сегодня! 🎅</b>')
+            return
 
-    upd_list = {
-        'balance': user.balance,
-        'btc': user.btc,
-        'energy': user.energy,
-        'yen': user.yen,
-        'exp': user.expe,
-        'ecoins': user.bcoins,
-        'case1': user.case[1],
-        'case2': user.case[2],
-        'case3': user.case[3],
-        'case4': user.case[4],
-        'rating': user.rating,
-        'corn': user.corn,
-        'biores': user.biores,
-        'titanium': user.mine.titanium,
-        'palladium': user.mine.palladium,
-        'matter': user.mine.matter,
-    }
+        upd_list = {
+            'balance': user.balance,
+            'btc': user.btc,
+            'energy': user.energy,
+            'yen': user.yen,
+            'exp': user.expe,
+            'ecoins': user.bcoins,
+            'case1': user.case[1],
+            'case2': user.case[2],
+            'case3': user.case[3],
+            'case4': user.case[4],
+            'rating': user.rating,
+            'corn': user.corn,
+            'biores': user.biores,
+            'titanium': user.mine.titanium,
+            'palladium': user.mine.palladium,
+            'matter': user.mine.matter,
+        }
 
-    await upd_list[prize[0]].upd(prize[1], '+')
-    await call.answer(text=f'{user.name}, Вы получили: {tr(prize[1])} {prize[2]} 🎅', show_alert=True)
-    await db.prize_received(user.user_id)
+        await upd_list[prize[0]].upd(prize[1], '+')
+        await call.answer(text=f'{user.name}, Вы получили: {tr(prize[1])} {prize[2]} 🎅', show_alert=True)
+        await db.prize_received(user.user_id)
+    except Exception as e:
+        await call.answer(f'❌ Ошибка при получении подарка: {str(e)}', show_alert=True)
 
 
 @antispam
 @admin_only(private=True)
 async def edit_prizes_cmd(message: Message, user: BFGuser):
-    day = await db.get_day()
-    prize = await db.get_prizes()
-    
-    await message.answer(
-        '🎅 <b>ХО-ХО-ХО! Новогодняя доставка! Получите и распишитесь:</b>', 
-        reply_markup=info_prizes_kb(prize, day, user.user_id)
-    )
+    try:
+        day = await db.get_day()
+        prize = await db.get_prizes()
+        
+        await message.answer(
+            '🎅 <b>ХО-ХО-ХО! Новогодняя доставка! Получите и распишитесь:</b>', 
+            reply_markup=info_prizes_kb(prize, day, user.user_id)
+        )
+    except Exception as e:
+        await message.answer(f'❌ Ошибка при редактировании календаря: {str(e)}')
 
 
 async def edit_prize_kb(call: CallbackQuery):
-    day = int(call.data.split('_')[1].split('|')[0])
-    await call.message.edit_text(
-        f'🎅 Выберите новую награду для дня <b>#{day}</b>:', 
-        reply_markup=edit_prizes_kb(day)
-    )
+    try:
+        day = int(call.data.split('_')[1].split('|')[0])
+        await call.message.edit_text(
+            f'🎅 Выберите новую награду для дня <b>#{day}</b>:', 
+            reply_markup=edit_prizes_kb(day)
+        )
+    except Exception as e:
+        await call.answer(f'❌ Ошибка: {str(e)}', show_alert=True)
 
 
 async def edit_summ_kb(call: CallbackQuery, state: FSMContext):
-    day = int(call.data.split('_')[1])
-    prize = call.data.split('_')[2].split('|')[0]
-    await call.message.edit_text(
-        f'🎅 Введите сумму для дня <b>#{day} ({PRIZES_CONFIG[prize]})</b>:\n\n<i>Для отмены введите "-"</i>'
-    )
-    await state.update_data(column=prize, day=day)
-    await state.set_state(SetSummState.summ)
+    try:
+        day = int(call.data.split('_')[1])
+        prize = call.data.split('_')[2].split('|')[0]
+        await call.message.edit_text(
+            f'🎅 Введите сумму для дня <b>#{day} ({PRIZES_CONFIG[prize]})</b>:\n\n<i>Для отмены введите "-"</i>'
+        )
+        await state.update_data(column=prize, day=day)
+        await state.set_state(SetSummState.summ)
+    except Exception as e:
+        await call.answer(f'❌ Ошибка: {str(e)}', show_alert=True)
 
 
 async def dell_message_kb(call: CallbackQuery):
@@ -269,36 +291,43 @@ async def dell_message_kb(call: CallbackQuery):
 
 
 async def set_summ_cmd(message: Message, state: FSMContext):
-    if message.text == '-':
-        await state.clear()
-        await message.answer('Отменено.')
-        return
-    
     try:
-        summ = int(message.text)
-    except:
-        await message.answer('Введите целое число.')
-        return
-    
-    if summ <= 0:
-        await message.answer('Ты серьёзно?')
-        return
-    
-    data = await state.get_data()
-    await db.upd_prize(data['day'], data['column'], summ)
-    
-    txt = PRIZES_CONFIG[data['column']]
-    await message.answer(f'🎅 Установленна новая награда на <b>#{data["day"]}</b> день: <code>{tr(summ)} {txt}</code>')
-    await state.clear()
+        if message.text == '-':
+            await state.clear()
+            await message.answer('Отменено.')
+            return
+        
+        try:
+            summ = int(message.text)
+        except:
+            await message.answer('Введите целое число.')
+            return
+        
+        if summ <= 0:
+            await message.answer('Ты серьёзно?')
+            return
+        
+        data = await state.get_data()
+        await db.upd_prize(data['day'], data['column'], summ)
+        
+        txt = PRIZES_CONFIG[data['column']]
+        await message.answer(f'🎅 Установленна новая награда на <b>#{data["day"]}</b> день: <code>{tr(summ)} {txt}</code>')
+        await state.clear()
+    except Exception as e:
+        await message.answer(f'❌ Ошибка при установке суммы: {str(e)}')
 
 
 async def check() -> None:
     while True:
-        now = datetime.now()
-        if now.hour == 00 and now.minute == 00:
-            await db.upd_day()
-            await asyncio.sleep(120)
-        await asyncio.sleep(15)
+        try:
+            now = datetime.now()
+            if now.hour == 0 and now.minute == 0:
+                await db.upd_day()
+                await asyncio.sleep(120)
+            await asyncio.sleep(15)
+        except Exception as e:
+            print(f"Ошибка в фоновой задаче: {e}")
+            await asyncio.sleep(60)
 
 
 # Создание роутера и регистрация обработчиков
@@ -349,5 +378,9 @@ MODULE_DESCRIPTION = {
 }
 
 # Запуск фоновой задачи
-loop = asyncio.get_event_loop()
-loop.create_task(check())
+try:
+    loop = asyncio.get_event_loop()
+    loop.create_task(check())
+except:
+    # Если loop уже запущен
+    asyncio.create_task(check())
