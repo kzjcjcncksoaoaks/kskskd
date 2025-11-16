@@ -1,6 +1,7 @@
 import sqlite3
+import os
 from decimal import Decimal
-from contextlib import asynccontextmanager
+from pathlib import Path
 
 from aiogram import Bot, Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -134,93 +135,148 @@ def upd_keyboards(rtop: int) -> None:
 
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('modules/temp/referrals.db')
-        self.cursor = self.conn.cursor()
-        self.create_tables()
+        # Создаем директорию если не существует
+        db_path = 'modules/temp/referrals.db'
+        db_dir = os.path.dirname(db_path)
+        
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            print(f"Создана директория: {db_dir}")
+        
+        # Альтернативный путь если основной не работает
+        try:
+            self.conn = sqlite3.connect(db_path)
+            self.cursor = self.conn.cursor()
+            self.create_tables()
+        except Exception as e:
+            print(f"Ошибка при подключении к {db_path}: {e}")
+            # Пробуем создать в текущей директории
+            try:
+                self.conn = sqlite3.connect('referrals.db')
+                self.cursor = self.conn.cursor()
+                self.create_tables()
+                print("База данных создана в текущей директории: referrals.db")
+            except Exception as e2:
+                print(f"Критическая ошибка: {e2}")
+                raise
     
     def create_tables(self) -> None:
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER,
-                ref INTEGER DEFAULT '0',
+                user_id INTEGER PRIMARY KEY,
+                ref INTEGER DEFAULT 0,
                 balance TEXT DEFAULT '0'
             )''')
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
                 summ TEXT,
                 column TEXT,
-                rtop INTEGER DEFAULT '1'
+                rtop INTEGER DEFAULT 1
             )''')
         
-        rtop = self.cursor.execute('SELECT rtop FROM settings').fetchone()
+        # Проверяем есть ли настройки
+        rtop = self.cursor.execute('SELECT rtop FROM settings WHERE id = 1').fetchone()
         if not rtop:
             summ = 1_000_000_000_000_000
-            self.cursor.execute('INSERT INTO settings (summ, column) VALUES (?, ?)', (summ, 'balance'))
+            self.cursor.execute('INSERT INTO settings (id, summ, column) VALUES (1, ?, ?)', (summ, 'balance'))
             rtop = 1
         else:
             rtop = rtop[0]
         self.conn.commit()
         
         upd_keyboards(rtop)
+        print("Таблицы реферальной системы инициализированы")
         
     async def upd_settings(self, summ, column):
-        self.cursor.execute('UPDATE settings SET summ = ?, column = ?', (summ, column))
+        self.cursor.execute('UPDATE settings SET summ = ?, column = ? WHERE id = 1', (summ, column))
         self.cursor.execute('UPDATE users SET balance = 0')
         self.conn.commit()
         
     async def upd_rtop(self, rtop):
-        self.cursor.execute('UPDATE settings SET rtop = ?', (rtop,))
+        self.cursor.execute('UPDATE settings SET rtop = ? WHERE id = 1', (rtop,))
         self.conn.commit()
         
     async def get_rtop(self) -> int:
-        return self.cursor.execute('SELECT rtop FROM settings').fetchone()[0]
+        result = self.cursor.execute('SELECT rtop FROM settings WHERE id = 1').fetchone()
+        return result[0] if result else 1
     
     async def reg_user(self, user_id) -> None:
-        ex = self.cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,)).fetchone()
-        if not ex:
-            self.cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,))
-            self.conn.commit()
+        try:
+            ex = self.cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,)).fetchone()
+            if not ex:
+                self.cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,))
+                self.conn.commit()
+        except Exception as e:
+            print(f"Ошибка при регистрации пользователя {user_id}: {e}")
     
     async def get_info(self, user_id) -> tuple:
         await self.reg_user(user_id)
-        return self.cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)).fetchone()
+        result = self.cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)).fetchone()
+        if not result:
+            return (user_id, 0, '0')
+        return result
     
     async def get_summ(self) -> tuple:
-        return self.cursor.execute('SELECT summ, column FROM settings').fetchone()
+        result = self.cursor.execute('SELECT summ, column FROM settings WHERE id = 1').fetchone()
+        if not result:
+            return ('1000000000000000', 'balance')
+        return result
     
     async def upd_summ(self, summ) -> None:
         summ = "{:.0f}".format(summ)
-        self.cursor.execute('UPDATE settings SET summ = ?', (summ,))
+        self.cursor.execute('UPDATE settings SET summ = ? WHERE id = 1', (summ,))
         self.conn.commit()
         
     async def new_ref(self, user_id, summ) -> None:
         await self.reg_user(user_id)
-        rbalance = self.cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,)).fetchone()[0]
-        
-        new_rbalance = Decimal(str(rbalance)) + Decimal(str(summ))
-        new_rbalance = "{:.0f}".format(new_rbalance)
-        
-        self.cursor.execute('UPDATE users SET balance = ? WHERE user_id = ?', (new_rbalance, user_id))
-        self.cursor.execute('UPDATE users SET ref = ref + 1 WHERE user_id = ?', (user_id,))
-        self.conn.commit()
+        try:
+            rbalance = self.cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,)).fetchone()
+            if not rbalance:
+                rbalance = '0'
+            else:
+                rbalance = rbalance[0]
+            
+            new_rbalance = Decimal(str(rbalance)) + Decimal(str(summ))
+            new_rbalance = "{:.0f}".format(new_rbalance)
+            
+            self.cursor.execute('UPDATE users SET balance = ? WHERE user_id = ?', (new_rbalance, user_id))
+            self.cursor.execute('UPDATE users SET ref = ref + 1 WHERE user_id = ?', (user_id,))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Ошибка при добавлении реферала: {e}")
         
     async def get_top(self) -> list:
-        data = self.cursor.execute('SELECT user_id, ref FROM users ORDER BY ref DESC LIMIT 10').fetchall()
-        users = []
-        
-        for user_id, ref in data:
-            name = cursorgdb.execute("SELECT name FROM users WHERE user_id = ?", (user_id,)).fetchone()
-            if name:
-                users.append((user_id, ref, name[0]))
-        return users
+        try:
+            data = self.cursor.execute('SELECT user_id, ref FROM users ORDER BY ref DESC LIMIT 10').fetchall()
+            users = []
+            
+            for user_id, ref in data:
+                name = cursorgdb.execute("SELECT name FROM users WHERE user_id = ?", (user_id,)).fetchone()
+                if name:
+                    users.append((user_id, ref, name[0]))
+            return users
+        except Exception as e:
+            print(f"Ошибка при получении топа: {e}")
+            return []
         
 
-db = Database()
+# Создаем экземпляр базы данных
+try:
+    db = Database()
+except Exception as e:
+    print(f"Критическая ошибка при инициализации БД: {e}")
+    # Создаем заглушку чтобы бот не падал
+    db = None
 
 
 @ref_router.message(F.text.lower().in_(['реф', '/ref']))
 @antispam
 async def ref(message: Message, user: BFGuser):
+    if not db:
+        await message.answer("❌ Реферальная система временно недоступна")
+        return
+        
     summ, column = await db.get_summ()
     data = await db.get_info(user.id)
     await message.answer(f'''https://t.me/{cfg.bot_username}?start=r{user.game_id}
@@ -234,6 +290,9 @@ async def ref(message: Message, user: BFGuser):
 
 
 async def on_start_event(event, *args):
+    if not db:
+        return
+        
     try:
         message = args[0]['message']
         user_id = message.from_user.id
@@ -273,14 +332,21 @@ async def update_user_balance(user_id, column, summ):
     
     if column in column_map:
         db_column = column_map[column]
-        cursorgdb.execute(f"UPDATE users SET {db_column} = {db_column} + ? WHERE user_id = ?", (summ, user_id))
-        cursorgdb.connection.commit()
+        try:
+            cursorgdb.execute(f"UPDATE users SET {db_column} = {db_column} + ? WHERE user_id = ?", (summ, user_id))
+            cursorgdb.connection.commit()
+        except Exception as e:
+            print(f"Ошибка при обновлении баланса: {e}")
 
 
 @ref_router.message(Command('refsetting'))
 @antispam
 @admin_only(private=True)
 async def settings_cmd(message: Message, user: BFGuser):
+    if not db:
+        await message.answer("❌ Реферальная система временно недоступна")
+        return
+        
     summ, column = await db.get_summ()
     top = await db.get_rtop()
     await message.answer(f'{user.url}, текущая награда за реферала - {freward(column, summ)}', reply_markup=settings_kb(top))
@@ -296,11 +362,19 @@ async def dell_message_kb(call: CallbackQuery):
 
 @ref_router.callback_query(F.data == 'ref-edit-prize')
 async def select_prize_kb(call: CallbackQuery):
+    if not db:
+        await call.answer("❌ Реферальная система временно недоступна", show_alert=True)
+        return
+        
     await call.message.edit_text('👥 <b>Выберите валюту для награды:</b>', reply_markup=select_values())
 
 
 @ref_router.callback_query(F.data.startswith('ref-set-prize_'))
 async def edit_prize_kb(call: CallbackQuery, state: FSMContext):
+    if not db:
+        await call.answer("❌ Реферальная система временно недоступна", show_alert=True)
+        return
+        
     prize = call.data.split('_')[1]
     await call.message.edit_text(f'👥 Введите сумму награды ({CONFIG_VALUES[prize][3]}):\n\n<i>Для отмены введите "-"</i>')
     await state.update_data(column=prize)
@@ -309,6 +383,11 @@ async def edit_prize_kb(call: CallbackQuery, state: FSMContext):
 
 @ref_router.message(SetRefSummState.summ)
 async def enter_summ_cmd(message: Message, state: FSMContext):
+    if not db:
+        await message.answer("❌ Реферальная система временно недоступна")
+        await state.clear()
+        return
+        
     if message.text == '-':
         await state.clear()
         await message.answer('Отменено.')
@@ -333,6 +412,10 @@ async def enter_summ_cmd(message: Message, state: FSMContext):
 
 @ref_router.callback_query(F.data == 'ref-edit-top')
 async def edit_top_kb(call: CallbackQuery):
+    if not db:
+        await call.answer("❌ Реферальная система временно недоступна", show_alert=True)
+        return
+        
     top = await db.get_rtop()
     new_top = 1 if top == 0 else 0
     upd_keyboards(new_top)
@@ -343,6 +426,10 @@ async def edit_top_kb(call: CallbackQuery):
 @ref_router.callback_query(F.data.startswith('ref-top'))
 @antispam_earning
 async def ref_top_kb(call: CallbackQuery, user: BFGuser):
+    if not db:
+        await call.answer("❌ Реферальная система временно недоступна", show_alert=True)
+        return
+        
     top = await db.get_top()
     tab = call.data.split('|')[2]
     
@@ -352,9 +439,12 @@ async def ref_top_kb(call: CallbackQuery, user: BFGuser):
     top_message = f"{user.url}, топ 10 игроков бота по рефералам:\n"
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     
-    for i, player in enumerate(top[:10], start=1):
-        emj = emojis[i - 1]
-        top_message += f"{emj} {player[2]} — {player[1]}👥\n"
+    if not top:
+        top_message += "\n😕 Пока нет рефералов"
+    else:
+        for i, player in enumerate(top[:10], start=1):
+            emj = emojis[i - 1] if i <= 10 else f"{i}."
+            top_message += f"{emj} {player[2]} — {player[1]}👥\n"
     
     await call.message.edit_text(text=top_message, reply_markup=assets_kb.top(user.id, 'ref'), disable_web_page_preview=True)
 
@@ -365,6 +455,7 @@ def register_handlers(dp):
     try:
         from assets.classes import CastomEvent
         CastomEvent.subscribe('start_event', on_start_event)
+        print("Реферальная система: подписка на start_event выполнена")
     except ImportError:
         print("CastomEvent не найден, пропускаем подписку на события")
 
@@ -372,4 +463,4 @@ def register_handlers(dp):
 MODULE_DESCRIPTION = {
     'name': '👥 Реферальная система',
     'description': 'Реферальная система\nЕсть возможность настроить награду за реферала\nКоманда /refsetting'
-}
+        }
