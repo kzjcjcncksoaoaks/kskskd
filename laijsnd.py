@@ -128,9 +128,6 @@ class Database:
         self.conn.commit()
 
 
-# Удалена функция edit_event_message() которая меняла конфиги
-
-
 # Инициализация базы данных
 db = Database()
 
@@ -318,7 +315,7 @@ async def check() -> None:
             await asyncio.sleep(60)
 
 
-# Создание роутера и регистрация обработчиков
+# Создание роутера
 router = Router()
 
 @router.message(F.text.lower() == 'календарь')
@@ -350,9 +347,14 @@ async def summ_state_handler(message: Message, state: FSMContext):
     await set_summ_cmd(message, state)
 
 
+# Глобальная переменная для отслеживания регистрации
+_router_registered = False
+
 def register_handlers(dp):
-    dp.include_router(router)
-    # Убрано edit_event_message() чтобы не менять конфиги
+    global _router_registered
+    if not _router_registered:
+        dp.include_router(router)
+        _router_registered = True
 
 
 MODULE_DESCRIPTION = {
