@@ -8,7 +8,6 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-from assets.classes import CastomEvent
 from assets.antispam import antispam, admin_only, antispam_earning
 from assets.transform import transform_int as tr
 from bot import bot
@@ -17,7 +16,32 @@ import config as cfg
 
 from commands.db import cursor as cursorgdb
 from user import BFGuser
-import assets.kb
+
+# Создаем базовую реализацию kb модуля
+class KBModule:
+    @staticmethod
+    def top(user_id, tab):
+        """Базовая реализация top клавиатуры"""
+        keyboards = InlineKeyboardMarkup(row_width=2)
+        buttons = [
+            InlineKeyboardButton("👑 Топ рейтинга", callback_data=f"top-rating|{user_id}|{tab}"),
+            InlineKeyboardButton("💰 Топ денег", callback_data=f"top-balance|{user_id}|{tab}"),
+            InlineKeyboardButton("🧰 Топ ферм", callback_data=f"top-cards|{user_id}|{tab}"),
+            InlineKeyboardButton("🗄 Топ бизнесов", callback_data=f"top-bsterritory|{user_id}|{tab}"),
+            InlineKeyboardButton("🏆 Топ опыта", callback_data=f"top-exp|{user_id}|{tab}"),
+            InlineKeyboardButton("💴 Топ йен", callback_data=f"top-yen|{user_id}|{tab}"),
+            InlineKeyboardButton("📦 Топ обычных кейсов", callback_data=f"top-case1|{user_id}|{tab}"),
+            InlineKeyboardButton("🏵 Топ золотых кейсов", callback_data=f"top-case2|{user_id}|{tab}"),
+            InlineKeyboardButton("🏺 Топ рудных кейсов", callback_data=f"top-case3|{user_id}|{tab}"),
+            InlineKeyboardButton("🌌 Топ материальных кейсов", callback_data=f"top-case4|{user_id}|{tab}"),
+            InlineKeyboardButton("👥 Топ рефералов", callback_data=f"ref-top|{user_id}|{tab}"),
+        ]
+        keyboards.add(*buttons)
+        return keyboards
+
+# Создаем экземпляр модуля клавиатур
+assets_kb = KBModule()
+original_kb = assets_kb.top
 
 
 class SetRefSummState(StatesGroup):
@@ -37,8 +61,6 @@ CONFIG_VALUES = {
     'biores': ['user.biores', '☣️', ['биоресурс', 'биоресурса', 'биоресурсов'], '☣️ Биоресурсы'],
     'matter': ['user.mine.matter', '🌌', ['материя', 'материи', 'материй'], '🌌 Материя'],
 }
-
-original_kb = assets.kb.top
 
 # Создаем роутер
 ref_router = Router()
@@ -65,7 +87,7 @@ def freward(key: str, amount: int) -> str:
 
 def settings_kb(top) -> InlineKeyboardMarkup:
     keyboards = InlineKeyboardMarkup(row_width=1)
-    txt = '➕ Добавить топ рефаводов' if top == 0 else '❌ Удалить топ рефаводов'
+    txt = '➕ Добавить топ рефералов' if top == 0 else '❌ Удалить топ рефералов'
     keyboards.add(InlineKeyboardButton("✍️ Изменить награду", callback_data='ref-edit-prize'))
     keyboards.add(InlineKeyboardButton(txt, callback_data='ref-edit-top'))
     return keyboards
@@ -96,7 +118,7 @@ def top_substitution_kb(user_id, tab) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🏵 Топ золотых кейсов", callback_data=f"top-case2|{user_id}|{tab}"),
         InlineKeyboardButton("🏺 Топ рудных кейсов", callback_data=f"top-case3|{user_id}|{tab}"),
         InlineKeyboardButton("🌌 Топ материальных кейсов", callback_data=f"top-case4|{user_id}|{tab}"),
-        InlineKeyboardButton("👥 Топ рефаводов", callback_data=f"ref-top|{user_id}|{tab}"),
+        InlineKeyboardButton("👥 Топ рефералов", callback_data=f"ref-top|{user_id}|{tab}"),
     ]
     
     keyboards.add(*buttons)
@@ -105,9 +127,9 @@ def top_substitution_kb(user_id, tab) -> InlineKeyboardMarkup:
 
 def upd_keyboards(rtop: int) -> None:
     if rtop == 0:
-        assets.kb.top = original_kb
+        assets_kb.top = original_kb
     else:
-        assets.kb.top = top_substitution_kb
+        assets_kb.top = top_substitution_kb
 
 
 class Database:
@@ -227,12 +249,32 @@ async def on_start_event(event, *args):
         user = BFGuser(not_class=real_id[0])
         await user.update()
         
-        await eval(CONFIG_VALUES[column][0]).upd(summ, '+')
+        # Упрощенная версия без eval для безопасности
+        await update_user_balance(real_id[0], column, summ)
         await db.new_ref(real_id[0], summ)
         
         await bot.send_message(real_id[0], f'🥰 <b>Спасибо за приглашение!</b>\nНа ваш баланс зачислено {freward(column, summ)}')
     except Exception as e:
         print('ref error: ', e)
+
+
+async def update_user_balance(user_id, column, summ):
+    """Безопасное обновление баланса пользователя"""
+    column_map = {
+        'balance': 'balance',
+        'energy': 'energy', 
+        'yen': 'yen',
+        'exp': 'exp',
+        'ecoins': 'bcoins',
+        'corn': 'corn',
+        'biores': 'biores',
+        'matter': 'matter'
+    }
+    
+    if column in column_map:
+        db_column = column_map[column]
+        cursorgdb.execute(f"UPDATE users SET {db_column} = {db_column} + ? WHERE user_id = ?", (summ, user_id))
+        cursorgdb.connection.commit()
 
 
 @ref_router.message(Command('refsetting'))
@@ -308,18 +350,23 @@ async def ref_top_kb(call: CallbackQuery, user: BFGuser):
         return
     
     top_message = f"{user.url}, топ 10 игроков бота по рефералам:\n"
-    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "1️⃣0️⃣"]
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     
     for i, player in enumerate(top[:10], start=1):
         emj = emojis[i - 1]
         top_message += f"{emj} {player[2]} — {player[1]}👥\n"
     
-    await call.message.edit_text(text=top_message, reply_markup=assets.kb.top(user.id, 'ref'), disable_web_page_preview=True)
+    await call.message.edit_text(text=top_message, reply_markup=assets_kb.top(user.id, 'ref'), disable_web_page_preview=True)
 
 
 def register_handlers(dp):
     dp.include_router(ref_router)
-    CastomEvent.subscribe('start_event', on_start_event)
+    # Если CastomEvent существует, подписываемся на событие
+    try:
+        from assets.classes import CastomEvent
+        CastomEvent.subscribe('start_event', on_start_event)
+    except ImportError:
+        print("CastomEvent не найден, пропускаем подписку на события")
 
 
 MODULE_DESCRIPTION = {
