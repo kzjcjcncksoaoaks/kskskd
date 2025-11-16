@@ -1,69 +1,118 @@
-import asyncio
-from datetime import datetime
 import sqlite3
-import os
-from pathlib import Path
+from decimal import Decimal
+from contextlib import asynccontextmanager
 
-from aiogram import Router, F
+from aiogram import Bot, Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
+from assets.classes import CastomEvent
+from assets.antispam import antispam, admin_only, antispam_earning
 from assets.transform import transform_int as tr
-from assets.antispam import antispam, antispam_earning, new_earning, admin_only
+from bot import bot
+from commands.help import CONFIG
+import config as cfg
+
+from commands.db import cursor as cursorgdb
 from user import BFGuser
+import assets.kb
 
 
-class SetSummState(StatesGroup):
+class SetRefSummState(StatesGroup):
+    column = State()
     summ = State()
 
 
-DEFOULT_PRIZES = {
-    1: ['balance', 1_000_000_000_000, '💰 Денег'],
-    2: ['btc', 1_000_000_000, '🌐 Биткоинов'],
-    3: ['energy', 30, '⚡️ Энергии'],
-    4: ['balance', 5_000_000_000_000, '💰 Денег'],
-    5: ['yen', 100_000_000, '💴 Йен'],
-    6: ['matter', 300, '🌌 Материи'],
-    7: ['palladium', 1, '⚗️ Палладиум'],
-    8: ['balance', 5_000_000_000_000, '💰 Денег'],
-    9: ['matter', 500, '🌌 Материи'],
-    10: ['energy', 30, '⚡️ Энергии'],
-    11: ['exp', 3000, '💡 Опыта'],
-    12: ['balance', 100_000_000_000_000, '💰 Денег'],
-    13: ['balance', 500_000_000_000_000, '💰 Денег'],
-    14: ['ecoins', 20, '💳 B-coins'],
+CONFIG['help_osn'] += '\n   👥 Реф'
+
+CONFIG_VALUES = {
+    'balance': ['user.balance', '$', ['', '', ''], '💰 Деньги'],
+    'energy': ['user.energy', '⚡️', ['энергия', 'энергии', 'энергий'], '⚡️ Энергия'],
+    'yen': ['user.yen', '💴', ['йена', 'йены', 'йен'], '💴 Йены'],
+    'exp': ['user.exp', '💡', ['опыт', 'опыта', 'опытов'], '💡 Опыт'],
+    'ecoins': ['user.bcoins', '💳', ['B-coin', 'B-coins', 'B-coins'], '💳 B-coins'],
+    'corn': ['user.corn', '🥜', ['зерно', 'зерна', 'зёрен'], '🥜 Зерна'],
+    'biores': ['user.biores', '☣️', ['биоресурс', 'биоресурса', 'биоресурсов'], '☣️ Биоресурсы'],
+    'matter': ['user.mine.matter', '🌌', ['материя', 'материи', 'материй'], '🌌 Материя'],
 }
 
-PRIZES_CONFIG = {
-    'balance': '💰 Денег',
-    'btc': '🌐 Биткоинов',
-    'energy': '⚡️ Энергии',
-    'yen': '💴 Йен',
-    'exp': '💡 Опыта',
-    'ecoins': '💳 B-coins',
-    'case1': '📦 Обычный кейс',
-    'case2': '🏵 Золотой кейс',
-    'case3': '🏺 Рудный кейс',
-    'case4': '🌌 Материальный кейс',
-    'rating': '👑 Рейтинга',
-    'corn': '🥜 Зёрна',
-    'biores': '☣️ Биоресурсов',
-    'titanium': '⚙️ Титана',
-    'palladium': '⚗️ Палладий',
-    'matter': '🌌 Материи',
-}
+original_kb = assets.kb.top
+
+# Создаем роутер
+ref_router = Router()
+
+
+def get_form(number: int, forms: list[str]) -> str:
+    number = abs(int(number)) % 100
+    if 11 <= number <= 19:
+        return forms[2]
+    last_digit = number % 10
+    if last_digit == 1:
+        return forms[0]
+    if 2 <= last_digit <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def freward(key: str, amount: int) -> str:
+    config = CONFIG_VALUES[key]
+    symbol, forms = config[1], config[2]
+    word_form = get_form(amount, forms)
+    return f"{tr(amount)}{symbol} {word_form}"
+
+
+def settings_kb(top) -> InlineKeyboardMarkup:
+    keyboards = InlineKeyboardMarkup(row_width=1)
+    txt = '➕ Добавить топ рефаводов' if top == 0 else '❌ Удалить топ рефаводов'
+    keyboards.add(InlineKeyboardButton("✍️ Изменить награду", callback_data='ref-edit-prize'))
+    keyboards.add(InlineKeyboardButton(txt, callback_data='ref-edit-top'))
+    return keyboards
+
+
+def select_values() -> InlineKeyboardMarkup:
+    keyboards = InlineKeyboardMarkup(row_width=3)
+    buttons = []
+    
+    for key, value in CONFIG_VALUES.items():
+        buttons.append(InlineKeyboardButton(value[3], callback_data=f'ref-set-prize_{key}'))
+    
+    keyboards.add(*buttons)
+    keyboards.add(InlineKeyboardButton("❌ Закрыть", callback_data='ref-dell'))
+    return keyboards
+
+
+def top_substitution_kb(user_id, tab) -> InlineKeyboardMarkup:
+    keyboards = InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        InlineKeyboardButton("👑 Топ рейтинга", callback_data=f"top-rating|{user_id}|{tab}"),
+        InlineKeyboardButton("💰 Топ денег", callback_data=f"top-balance|{user_id}|{tab}"),
+        InlineKeyboardButton("🧰 Топ ферм", callback_data=f"top-cards|{user_id}|{tab}"),
+        InlineKeyboardButton("🗄 Топ бизнесов", callback_data=f"top-bsterritory|{user_id}|{tab}"),
+        InlineKeyboardButton("🏆 Топ опыта", callback_data=f"top-exp|{user_id}|{tab}"),
+        InlineKeyboardButton("💴 Топ йен", callback_data=f"top-yen|{user_id}|{tab}"),
+        InlineKeyboardButton("📦 Топ обычных кейсов", callback_data=f"top-case1|{user_id}|{tab}"),
+        InlineKeyboardButton("🏵 Топ золотых кейсов", callback_data=f"top-case2|{user_id}|{tab}"),
+        InlineKeyboardButton("🏺 Топ рудных кейсов", callback_data=f"top-case3|{user_id}|{tab}"),
+        InlineKeyboardButton("🌌 Топ материальных кейсов", callback_data=f"top-case4|{user_id}|{tab}"),
+        InlineKeyboardButton("👥 Топ рефаводов", callback_data=f"ref-top|{user_id}|{tab}"),
+    ]
+    
+    keyboards.add(*buttons)
+    return keyboards
+
+
+def upd_keyboards(rtop: int) -> None:
+    if rtop == 0:
+        assets.kb.top = original_kb
+    else:
+        assets.kb.top = top_substitution_kb
 
 
 class Database:
     def __init__(self):
-        # Создаем директорию если её нет
-        db_dir = Path('modules/temp')
-        db_dir.mkdir(parents=True, exist_ok=True)
-        
-        db_path = db_dir / 'winter_calendar.db'
-        self.conn = sqlite3.connect(str(db_path))
+        self.conn = sqlite3.connect('modules/temp/referrals.db')
         self.cursor = self.conn.cursor()
         self.create_tables()
     
@@ -71,203 +120,131 @@ class Database:
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER,
-                day INTEGER DEFAULT '0'
+                ref INTEGER DEFAULT '0',
+                balance TEXT DEFAULT '0'
             )''')
         self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS info (
-                day INTEGER
-            )''')
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS prize (
-                day INTEGER,
+            CREATE TABLE IF NOT EXISTS settings (
+                summ TEXT,
                 column TEXT,
-                summ INTEGER,
-                info TEXT
+                rtop INTEGER DEFAULT '1'
             )''')
+        
+        rtop = self.cursor.execute('SELECT rtop FROM settings').fetchone()
+        if not rtop:
+            summ = 1_000_000_000_000_000
+            self.cursor.execute('INSERT INTO settings (summ, column) VALUES (?, ?)', (summ, 'balance'))
+            rtop = 1
+        else:
+            rtop = rtop[0]
         self.conn.commit()
         
-        if not self.cursor.execute('SELECT * FROM info').fetchone():
-            self.cursor.execute('INSERT INTO info (day) VALUES (?)', (1,))
-            self.conn.commit()
-            
-        self.creat_prizes_list()
+        upd_keyboards(rtop)
         
-    def creat_prizes_list(self) -> None:
-        if not self.cursor.execute('SELECT * FROM prize').fetchone():
-            for day, i in DEFOULT_PRIZES.items():
-                self.cursor.execute('INSERT INTO prize (day, column, summ, info) VALUES (?, ?, ?, ?)', (day, i[0], i[1], i[2]))
-            self.conn.commit()
-            
-    async def upd_prize(self, day, column, summ) -> None:
-        info = PRIZES_CONFIG[column]
-        self.cursor.execute('UPDATE prize SET column = ?, summ = ?, info = ? WHERE day = ?', (column, summ, info, day))
+    async def upd_settings(self, summ, column):
+        self.cursor.execute('UPDATE settings SET summ = ?, column = ?', (summ, column))
+        self.cursor.execute('UPDATE users SET balance = 0')
         self.conn.commit()
-            
-    async def get_prizes(self) -> dict:
-        data = self.cursor.execute('SELECT * FROM prize').fetchall()
-        return {item[0]: list(item[1:]) for item in data}
-
-    async def get_day(self) -> int:
-        return self.cursor.execute('SELECT day FROM info').fetchone()[0]
-
-    async def get_user_day(self, user_id) -> int:
-        day = self.cursor.execute('SELECT day FROM users WHERE user_id = ?', (user_id,)).fetchone()
-        if not day:
+        
+    async def upd_rtop(self, rtop):
+        self.cursor.execute('UPDATE settings SET rtop = ?', (rtop,))
+        self.conn.commit()
+        
+    async def get_rtop(self) -> int:
+        return self.cursor.execute('SELECT rtop FROM settings').fetchone()[0]
+    
+    async def reg_user(self, user_id) -> None:
+        ex = self.cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,)).fetchone()
+        if not ex:
             self.cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,))
             self.conn.commit()
-            return 0
-        return day[0]
     
-    async def prize_received(self, user_id) -> None:
-        day = self.cursor.execute('SELECT day FROM info').fetchone()[0]
-        self.cursor.execute('UPDATE users SET day = ? WHERE user_id = ?', (day, user_id))
-        self.conn.commit()
+    async def get_info(self, user_id) -> tuple:
+        await self.reg_user(user_id)
+        return self.cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)).fetchone()
     
-    async def upd_day(self) -> None:
-        self.cursor.execute('UPDATE info SET day = day + 1')
+    async def get_summ(self) -> tuple:
+        return self.cursor.execute('SELECT summ, column FROM settings').fetchone()
+    
+    async def upd_summ(self, summ) -> None:
+        summ = "{:.0f}".format(summ)
+        self.cursor.execute('UPDATE settings SET summ = ?', (summ,))
         self.conn.commit()
+        
+    async def new_ref(self, user_id, summ) -> None:
+        await self.reg_user(user_id)
+        rbalance = self.cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,)).fetchone()[0]
+        
+        new_rbalance = Decimal(str(rbalance)) + Decimal(str(summ))
+        new_rbalance = "{:.0f}".format(new_rbalance)
+        
+        self.cursor.execute('UPDATE users SET balance = ? WHERE user_id = ?', (new_rbalance, user_id))
+        self.cursor.execute('UPDATE users SET ref = ref + 1 WHERE user_id = ?', (user_id,))
+        self.conn.commit()
+        
+    async def get_top(self) -> list:
+        data = self.cursor.execute('SELECT user_id, ref FROM users ORDER BY ref DESC LIMIT 10').fetchall()
+        users = []
+        
+        for user_id, ref in data:
+            name = cursorgdb.execute("SELECT name FROM users WHERE user_id = ?", (user_id,)).fetchone()
+            if name:
+                users.append((user_id, ref, name[0]))
+        return users
+        
 
-
-# Инициализация базы данных
 db = Database()
 
 
-def get_prize_kb() -> InlineKeyboardMarkup:
-    keyboards = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Получить", callback_data="winter-event-get-prize")]
-    ])
-    return keyboards
-
-
-def info_prizes_kb(data, lday, user_id) -> InlineKeyboardMarkup:
-    buttons = []
-    for day, i in data.items():
-        txt = '📍 |' if day == lday else ''
-        buttons.append([InlineKeyboardButton(
-            text=f"{txt} {tr(i[1])} {i[2]}", 
-            callback_data=f"winter-edit-prize_{day}|{user_id}"
-        )])
-    
-    keyboards = InlineKeyboardMarkup(inline_keyboard=buttons)
-    return keyboards
-
-
-def edit_prizes_kb(day) -> InlineKeyboardMarkup:
-    buttons = []
-    row = []
-    
-    for i, (key, item) in enumerate(PRIZES_CONFIG.items()):
-        row.append(InlineKeyboardButton(text=item, callback_data=f"winter-set-prize_{day}_{key}"))
-        if (i + 1) % 3 == 0:
-            buttons.append(row)
-            row = []
-    
-    if row:
-        buttons.append(row)
-    
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="winter-dell")])
-    
-    keyboards = InlineKeyboardMarkup(inline_keyboard=buttons)
-    return keyboards
-
-
+@ref_router.message(F.text.lower().in_(['реф', '/ref']))
 @antispam
-async def event_calendar_cmd(message: Message, user: BFGuser):
+async def ref(message: Message, user: BFGuser):
+    summ, column = await db.get_summ()
+    data = await db.get_info(user.id)
+    await message.answer(f'''https://t.me/{cfg.bot_username}?start=r{user.game_id}
+<code>·······························</code>
+{user.url}, твоя реферальная ссылка, можешь поделиться и получить {freward(column, summ)}
+
+👥 <i>Твои рефералы</i>
+<b>• {data[1]} чел.</b>
+✨ <i>Заработано с рефералов:</i>
+<b>• {freward(column, data[2])}</b>''')
+
+
+async def on_start_event(event, *args):
     try:
-        day = await db.get_day()
-        prize = await db.get_prizes()
-        prize = prize.get(day)
+        message = args[0]['message']
+        user_id = message.from_user.id
+        r_id = int(message.text.split('/start r')[1])
+        summ, column = await db.get_summ()
         
-        if not prize:
-            await message.answer(f'<b>{user.url}, месяц подарков к концу! Возвращайтесь в следующем году 🎅</b>')
+        user = cursorgdb.execute('SELECT game_id FROM users WHERE user_id = ?', (user_id,)).fetchone()
+        real_id = cursorgdb.execute('SELECT user_id FROM users WHERE game_id = ?', (r_id,)).fetchone()
+        
+        if user_id == r_id or not real_id or user:
             return
         
-        msg = await message.answer(
-            f'<b>{user.url}, сегодняшний подарок </b>(<code>{day}</code>/<code>14</code>)</b>: {tr(prize[1])} {prize[2]}', 
-            reply_markup=get_prize_kb()
-        )
-        await new_earning(msg)
+        user = BFGuser(not_class=real_id[0])
+        await user.update()
+        
+        await eval(CONFIG_VALUES[column][0]).upd(summ, '+')
+        await db.new_ref(real_id[0], summ)
+        
+        await bot.send_message(real_id[0], f'🥰 <b>Спасибо за приглашение!</b>\nНа ваш баланс зачислено {freward(column, summ)}')
     except Exception as e:
-        await message.answer(f'❌ Ошибка при получении календаря: {str(e)}')
+        print('ref error: ', e)
 
 
-@antispam_earning
-async def event_calendar_call(call: CallbackQuery, user: BFGuser):
-    try:
-        day = await db.get_day()
-        user_day = await db.get_user_day(user.user_id)
-        prize = await db.get_prizes()
-        prize = prize.get(day)
-
-        if user_day >= day or not prize:
-            await call.answer(f'<b>{user.name}, Вы уже забрали свой подарок сегодня! 🎅</b>')
-            return
-
-        upd_list = {
-            'balance': user.balance,
-            'btc': user.btc,
-            'energy': user.energy,
-            'yen': user.yen,
-            'exp': user.expe,
-            'ecoins': user.bcoins,
-            'case1': user.case[1],
-            'case2': user.case[2],
-            'case3': user.case[3],
-            'case4': user.case[4],
-            'rating': user.rating,
-            'corn': user.corn,
-            'biores': user.biores,
-            'titanium': user.mine.titanium,
-            'palladium': user.mine.palladium,
-            'matter': user.mine.matter,
-        }
-
-        await upd_list[prize[0]].upd(prize[1], '+')
-        await call.answer(text=f'{user.name}, Вы получили: {tr(prize[1])} {prize[2]} 🎅', show_alert=True)
-        await db.prize_received(user.user_id)
-    except Exception as e:
-        await call.answer(f'❌ Ошибка при получении подарка: {str(e)}', show_alert=True)
-
-
+@ref_router.message(Command('refsetting'))
 @antispam
 @admin_only(private=True)
-async def edit_prizes_cmd(message: Message, user: BFGuser):
-    try:
-        day = await db.get_day()
-        prize = await db.get_prizes()
-        
-        await message.answer(
-            '🎅 <b>ХО-ХО-ХО! Новогодняя доставка! Получите и распишитесь:</b>', 
-            reply_markup=info_prizes_kb(prize, day, user.user_id)
-        )
-    except Exception as e:
-        await message.answer(f'❌ Ошибка при редактировании календаря: {str(e)}')
+async def settings_cmd(message: Message, user: BFGuser):
+    summ, column = await db.get_summ()
+    top = await db.get_rtop()
+    await message.answer(f'{user.url}, текущая награда за реферала - {freward(column, summ)}', reply_markup=settings_kb(top))
 
 
-async def edit_prize_kb(call: CallbackQuery):
-    try:
-        day = int(call.data.split('_')[1].split('|')[0])
-        await call.message.edit_text(
-            f'🎅 Выберите новую награду для дня <b>#{day}</b>:', 
-            reply_markup=edit_prizes_kb(day)
-        )
-    except Exception as e:
-        await call.answer(f'❌ Ошибка: {str(e)}', show_alert=True)
-
-
-async def edit_summ_kb(call: CallbackQuery, state: FSMContext):
-    try:
-        day = int(call.data.split('_')[1])
-        prize = call.data.split('_')[2].split('|')[0]
-        await call.message.edit_text(
-            f'🎅 Введите сумму для дня <b>#{day} ({PRIZES_CONFIG[prize]})</b>:\n\n<i>Для отмены введите "-"</i>'
-        )
-        await state.update_data(column=prize, day=day)
-        await state.set_state(SetSummState.summ)
-    except Exception as e:
-        await call.answer(f'❌ Ошибка: {str(e)}', show_alert=True)
-
-
+@ref_router.callback_query(F.data == 'ref-dell')
 async def dell_message_kb(call: CallbackQuery):
     try:
         await call.message.delete()
@@ -275,102 +252,77 @@ async def dell_message_kb(call: CallbackQuery):
         print(e)
 
 
-async def set_summ_cmd(message: Message, state: FSMContext):
-    try:
-        if message.text == '-':
-            await state.clear()
-            await message.answer('Отменено.')
-            return
-        
-        try:
-            summ = int(message.text)
-        except:
-            await message.answer('Введите целое число.')
-            return
-        
-        if summ <= 0:
-            await message.answer('Ты серьёзно?')
-            return
-        
-        data = await state.get_data()
-        await db.upd_prize(data['day'], data['column'], summ)
-        
-        txt = PRIZES_CONFIG[data['column']]
-        await message.answer(f'🎅 Установленна новая награда на <b>#{data["day"]}</b> день: <code>{tr(summ)} {txt}</code>')
+@ref_router.callback_query(F.data == 'ref-edit-prize')
+async def select_prize_kb(call: CallbackQuery):
+    await call.message.edit_text('👥 <b>Выберите валюту для награды:</b>', reply_markup=select_values())
+
+
+@ref_router.callback_query(F.data.startswith('ref-set-prize_'))
+async def edit_prize_kb(call: CallbackQuery, state: FSMContext):
+    prize = call.data.split('_')[1]
+    await call.message.edit_text(f'👥 Введите сумму награды ({CONFIG_VALUES[prize][3]}):\n\n<i>Для отмены введите "-"</i>')
+    await state.update_data(column=prize)
+    await state.set_state(SetRefSummState.summ)
+
+
+@ref_router.message(SetRefSummState.summ)
+async def enter_summ_cmd(message: Message, state: FSMContext):
+    if message.text == '-':
         await state.clear()
-    except Exception as e:
-        await message.answer(f'❌ Ошибка при установке суммы: {str(e)}')
+        await message.answer('Отменено.')
+        return
+    
+    try:
+        summ = int(message.text)
+    except:
+        await message.answer('Введите целое число.')
+        return
+    
+    if summ <= 0:
+        await message.answer('Ты серьёзно?')
+        return
+    
+    data = await state.get_data()
+    await db.upd_settings(summ, data['column'])
+    
+    await state.clear()
+    await message.answer(f'✅ Установлена новая награда за реферала: {freward(data["column"], summ)}')
 
 
-async def check() -> None:
-    while True:
-        try:
-            now = datetime.now()
-            if now.hour == 0 and now.minute == 0:
-                await db.upd_day()
-                await asyncio.sleep(120)
-            await asyncio.sleep(15)
-        except Exception as e:
-            print(f"Ошибка в фоновой задаче: {e}")
-            await asyncio.sleep(60)
+@ref_router.callback_query(F.data == 'ref-edit-top')
+async def edit_top_kb(call: CallbackQuery):
+    top = await db.get_rtop()
+    new_top = 1 if top == 0 else 0
+    upd_keyboards(new_top)
+    await db.upd_rtop(new_top)
+    await call.message.edit_reply_markup(settings_kb(new_top))
 
 
-# Создание роутера
-router = Router()
+@ref_router.callback_query(F.data.startswith('ref-top'))
+@antispam_earning
+async def ref_top_kb(call: CallbackQuery, user: BFGuser):
+    top = await db.get_top()
+    tab = call.data.split('|')[2]
+    
+    if tab == 'ref':
+        return
+    
+    top_message = f"{user.url}, топ 10 игроков бота по рефералам:\n"
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "1️⃣0️⃣"]
+    
+    for i, player in enumerate(top[:10], start=1):
+        emj = emojis[i - 1]
+        top_message += f"{emj} {player[2]} — {player[1]}👥\n"
+    
+    await call.message.edit_text(text=top_message, reply_markup=assets.kb.top(user.id, 'ref'), disable_web_page_preview=True)
 
-@router.message(F.text.lower() == 'календарь')
-async def calendar_handler(message: Message, user: BFGuser):
-    await event_calendar_cmd(message, user)
-
-@router.callback_query(F.data == "winter-event-get-prize")
-async def get_prize_handler(call: CallbackQuery, user: BFGuser):
-    await event_calendar_call(call, user)
-
-@router.message(Command("wcalendar"))
-async def wcalendar_handler(message: Message, user: BFGuser):
-    await edit_prizes_cmd(message, user)
-
-@router.callback_query(F.data.startswith("winter-edit-prize_"))
-async def edit_prize_handler(call: CallbackQuery):
-    await edit_prize_kb(call)
-
-@router.callback_query(F.data.startswith("winter-set-prize_"))
-async def set_prize_handler(call: CallbackQuery, state: FSMContext):
-    await edit_summ_kb(call, state)
-
-@router.callback_query(F.data == "winter-dell")
-async def dell_handler(call: CallbackQuery):
-    await dell_message_kb(call)
-
-@router.message(SetSummState.summ)
-async def summ_state_handler(message: Message, state: FSMContext):
-    await set_summ_cmd(message, state)
-
-
-# Глобальная переменная для отслеживания регистрации
-_router_registered = False
 
 def register_handlers(dp):
-    global _router_registered
-    if not _router_registered:
-        dp.include_router(router)
-        _router_registered = True
+    dp.include_router(ref_router)
+    CastomEvent.subscribe('start_event', on_start_event)
 
 
 MODULE_DESCRIPTION = {
-    'name': '☃️ Winter calendar',
-    'description': '''Ивент-модуль зима:
-- Новое оформление
-- Ивент календарь (команда "календарь")
-
-* Модуль использует собственную базу данных"
-* Для настройки наград введите /wcalendar (лс)'''
+    'name': '👥 Реферальная система',
+    'description': 'Реферальная система\nЕсть возможность настроить награду за реферала\nКоманда /refsetting'
 }
-
-# Запуск фоновой задачи
-try:
-    loop = asyncio.get_event_loop()
-    loop.create_task(check())
-except:
-    # Если loop уже запущен
-    asyncio.create_task(check())
