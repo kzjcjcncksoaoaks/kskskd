@@ -317,6 +317,14 @@
             vertical-align: middle;
         }
         
+        .error-message {
+            color: #ef4444;
+            text-align: center;
+            margin: 15px 0;
+            font-size: 14px;
+            display: none;
+        }
+        
         /* Адаптация под мобильные устройства */
         @media (max-width: 600px) {
             .container {
@@ -371,7 +379,7 @@
         
         <div class="header">
             <h1>Игровой Профиль</h1>
-            <p>Ваша информация из Telegram</p>
+            <p id="statusText">Загрузка данных профиля...</p>
         </div>
         
         <div class="profile-section">
@@ -386,6 +394,10 @@
                 <div class="user-name" id="userName">Загрузка...</div>
                 <div class="user-id" id="userId">ID: Загрузка...</div>
             </div>
+        </div>
+        
+        <div class="error-message" id="errorMessage">
+            Не удалось загрузить данные. Пожалуйста, откройте приложение через Telegram.
         </div>
         
         <button class="game-button" id="startGameBtn">
@@ -405,120 +417,171 @@
     </div>
 
     <script>
-        // Инициализация приложения
-        document.addEventListener('DOMContentLoaded', function() {
-            // Телеграм WebApp API
-            const tg = window.Telegram?.WebApp;
+        // Telegram WebApp API
+        const tg = window.Telegram?.WebApp;
+        
+        // Элементы DOM
+        const userAvatarEl = document.getElementById('userAvatar');
+        const userNameEl = document.getElementById('userName');
+        const userIdEl = document.getElementById('userId');
+        const startGameBtn = document.getElementById('startGameBtn');
+        const loadingEl = document.getElementById('loading');
+        const errorMessageEl = document.getElementById('errorMessage');
+        const statusTextEl = document.getElementById('statusText');
+        
+        // Реферальная ссылка для бота
+        const BOT_REFERRAL_LINK = 'https://t.me/craft_demo_bot/start?startapp=RHIQLf4';
+        
+        // Данные пользователя
+        let userData = {
+            firstName: '',
+            lastName: '',
+            username: '',
+            userId: '',
+            photoUrl: null
+        };
+        
+        // Функция инициализации Telegram WebApp
+        function initTelegramWebApp() {
+            if (!tg) {
+                console.error('Telegram WebApp не доступен');
+                showError('Откройте приложение через Telegram для корректной работы');
+                loadDemoData();
+                return false;
+            }
             
-            // Элементы DOM
-            const userAvatarEl = document.getElementById('userAvatar');
-            const userNameEl = document.getElementById('userName');
-            const userIdEl = document.getElementById('userId');
-            const startGameBtn = document.getElementById('startGameBtn');
-            const loadingEl = document.getElementById('loading');
+            // Инициализация Telegram WebApp
+            tg.expand();
+            tg.ready();
             
-            // Реферальная ссылка для бота
-            const BOT_REFERRAL_LINK = 'https://t.me/craft_demo_bot/start?startapp=RHIQLf4';
+            // Получаем данные пользователя из Telegram
+            const initData = tg.initDataUnsafe;
+            console.log('Telegram WebApp данные:', initData);
             
-            // Данные пользователя (по умолчанию для демо)
-            let userData = {
+            if (initData && initData.user) {
+                const tgUser = initData.user;
+                userData = {
+                    firstName: tgUser.first_name || 'Имя',
+                    lastName: tgUser.last_name || '',
+                    username: tgUser.username || '',
+                    userId: tgUser.id.toString(),
+                    photoUrl: tgUser.photo_url || null
+                };
+                
+                // Отображаем данные пользователя
+                displayUserData();
+                statusTextEl.textContent = 'Ваша информация из Telegram';
+                return true;
+            } else {
+                console.error('Данные пользователя не получены');
+                showError('Не удалось получить данные пользователя');
+                loadDemoData();
+                return false;
+            }
+        }
+        
+        // Функция отображения данных пользователя
+        function displayUserData() {
+            // Имя и фамилия
+            const fullName = `${userData.firstName} ${userData.lastName}`.trim();
+            userNameEl.textContent = fullName || 'Пользователь Telegram';
+            
+            // ID пользователя
+            userIdEl.textContent = `ID: ${userData.userId || 'Не доступен'}`;
+            
+            // Аватар
+            if (userData.photoUrl) {
+                userAvatarEl.innerHTML = `<img src="${userData.photoUrl}" alt="Аватар" class="avatar-img">`;
+                userAvatarEl.style.background = 'transparent';
+            } else {
+                // Используем первую букву имени на цветном фоне
+                const firstLetter = userData.firstName ? 
+                    userData.firstName.charAt(0).toUpperCase() : 'T';
+                const colors = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+                const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                
+                userAvatarEl.innerHTML = `<span>${firstLetter}</span>`;
+                userAvatarEl.style.background = `linear-gradient(135deg, ${randomColor}, ${randomColor}80)`;
+            }
+        }
+        
+        // Функция загрузки демо-данных
+        function loadDemoData() {
+            userData = {
                 firstName: 'Telegram',
-                lastName: 'User',
-                username: 'telegram_user',
+                lastName: 'Пользователь',
+                username: 'demo_user',
                 userId: '123456789',
                 photoUrl: null
             };
             
-            // Если есть доступ к Telegram WebApp API
-            if (tg) {
-                tg.expand();
-                tg.ready();
-                
-                const tgUser = tg.initDataUnsafe?.user;
-                
-                if (tgUser) {
-                    userData = {
-                        firstName: tgUser.first_name || 'Имя',
-                        lastName: tgUser.last_name || '',
-                        username: tgUser.username || '',
-                        userId: tgUser.id.toString(),
-                        photoUrl: tgUser.photo_url
-                    };
-                }
-            } else {
-                // Демо-данные для локального тестирования
-                console.log('Telegram WebApp API не доступен. Используются демо-данные.');
-            }
-            
-            // Отображение данных пользователя
-            function displayUserData() {
-                // Имя и фамилия
-                const fullName = `${userData.firstName} ${userData.lastName}`.trim();
-                userNameEl.textContent = fullName || 'Пользователь Telegram';
-                
-                // ID пользователя
-                userIdEl.textContent = `ID: ${userData.userId}`;
-                
-                // Аватар
-                if (userData.photoUrl) {
-                    userAvatarEl.innerHTML = `<img src="${userData.photoUrl}" alt="Аватар" class="avatar-img">`;
-                } else {
-                    // Используем первую букву имени на цветном фоне
-                    const firstLetter = userData.firstName ? userData.firstName.charAt(0).toUpperCase() : 'T';
-                    const colors = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
-                    const randomColor = colors[Math.floor(Math.random() * colors.length)];
-                    
-                    userAvatarEl.innerHTML = `<span>${firstLetter}</span>`;
-                    userAvatarEl.style.background = `linear-gradient(135deg, ${randomColor}, ${randomColor}80)`;
-                }
-            }
-            
-            // Обработчик клика по кнопке "Начать игру"
-            startGameBtn.addEventListener('click', function() {
-                // Показываем индикатор загрузки
-                loadingEl.style.display = 'block';
-                startGameBtn.disabled = true;
-                startGameBtn.style.opacity = '0.7';
-                
-                // Если в Telegram WebApp, используем его метод для открытия ссылки
-                if (tg) {
-                    tg.openTelegramLink(BOT_REFERRAL_LINK);
-                } else {
-                    // Иначе обычный переход по ссылке
-                    setTimeout(() => {
-                        window.open(BOT_REFERRAL_LINK, '_blank');
-                        
-                        // Скрываем индикатор загрузки через 3 секунды
-                        setTimeout(() => {
-                            loadingEl.style.display = 'none';
-                            startGameBtn.disabled = false;
-                            startGameBtn.style.opacity = '1';
-                        }, 3000);
-                    }, 1000);
-                }
-            });
-            
-            // Запрещаем подсветку элементов при взаимодействии
-            document.addEventListener('touchstart', function() {}, {passive: true});
-            document.addEventListener('mousedown', function(e) {
-                e.preventDefault();
-            });
-            
-            // Инициализация приложения
             displayUserData();
+            statusTextEl.textContent = 'Демо-режим (откройте через Telegram для реальных данных)';
+        }
+        
+        // Функция показа ошибки
+        function showError(message) {
+            errorMessageEl.textContent = message;
+            errorMessageEl.style.display = 'block';
+        }
+        
+        // Функция скрытия ошибки
+        function hideError() {
+            errorMessageEl.style.display = 'none';
+        }
+        
+        // Обработчик клика по кнопке "Начать игру"
+        startGameBtn.addEventListener('click', function() {
+            // Показываем индикатор загрузки
+            loadingEl.style.display = 'block';
+            startGameBtn.disabled = true;
+            startGameBtn.style.opacity = '0.7';
             
-            // Анимация появления элементов
-            const elements = document.querySelectorAll('.container > *:not(.bg-animation)');
-            elements.forEach((el, index) => {
-                el.style.opacity = '0';
-                el.style.transform = 'translateY(20px)';
-                
+            // Если в Telegram WebApp, используем его метод для открытия ссылки
+            if (tg) {
+                tg.openTelegramLink(BOT_REFERRAL_LINK);
+            } else {
+                // Иначе обычный переход по ссылке
                 setTimeout(() => {
-                    el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
-                    el.style.opacity = '1';
-                    el.style.transform = 'translateY(0)';
-                }, 100 + (index * 100));
-            });
+                    window.open(BOT_REFERRAL_LINK, '_blank');
+                    
+                    // Скрываем индикатор загрузки через 3 секунды
+                    setTimeout(() => {
+                        loadingEl.style.display = 'none';
+                        startGameBtn.disabled = false;
+                        startGameBtn.style.opacity = '1';
+                    }, 3000);
+                }, 1000);
+            }
+        });
+        
+        // Запрещаем подсветку элементов при взаимодействии
+        document.addEventListener('touchstart', function() {}, {passive: true});
+        document.addEventListener('mousedown', function(e) {
+            if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
+                e.preventDefault();
+            }
+        });
+        
+        // Инициализация приложения
+        document.addEventListener('DOMContentLoaded', function() {
+            // Задержка для анимации
+            setTimeout(() => {
+                initTelegramWebApp();
+                
+                // Анимация появления элементов
+                const elements = document.querySelectorAll('.container > *:not(.bg-animation)');
+                elements.forEach((el, index) => {
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateY(20px)';
+                    
+                    setTimeout(() => {
+                        el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                        el.style.opacity = '1';
+                        el.style.transform = 'translateY(0)';
+                    }, 100 + (index * 100));
+                });
+            }, 300);
         });
     </script>
 </body>
