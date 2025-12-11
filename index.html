@@ -1,1 +1,525 @@
-k
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Game | Профиль</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            outline: none;
+        }
+        
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #111111;
+            --accent-color: #7c3aed;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--primary-bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow-x: hidden;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 500px;
+            width: 100%;
+            background-color: var(--secondary-bg);
+            border-radius: 24px;
+            padding: 40px 30px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+        
+        /* Анимированный фон */
+        .bg-animation {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            z-index: -1;
+            border-radius: inherit;
+        }
+        
+        .bg-particle {
+            position: absolute;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(99, 102, 241, 0.05));
+            animation: float 15s infinite linear;
+        }
+        
+        .bg-particle:nth-child(1) {
+            width: 80px;
+            height: 80px;
+            top: -30px;
+            left: -30px;
+            animation-delay: 0s;
+        }
+        
+        .bg-particle:nth-child(2) {
+            width: 120px;
+            height: 120px;
+            bottom: -50px;
+            right: -40px;
+            animation-delay: -5s;
+        }
+        
+        .bg-particle:nth-child(3) {
+            width: 60px;
+            height: 60px;
+            top: 50%;
+            right: -20px;
+            animation-delay: -10s;
+        }
+        
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) rotate(0deg);
+            }
+            25% {
+                transform: translate(20px, 30px) rotate(90deg);
+            }
+            50% {
+                transform: translate(0, 60px) rotate(180deg);
+            }
+            75% {
+                transform: translate(-20px, 30px) rotate(270deg);
+            }
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(90deg, #f8fafc, #cbd5e1);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            position: relative;
+            display: inline-block;
+        }
+        
+        .header h1::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
+            border-radius: 3px;
+        }
+        
+        .header p {
+            color: var(--text-secondary);
+            font-size: 16px;
+            margin-top: 20px;
+        }
+        
+        .profile-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 40px;
+            position: relative;
+        }
+        
+        .avatar-container {
+            position: relative;
+            margin-bottom: 24px;
+        }
+        
+        .avatar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 3px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--text-primary);
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            transition: transform 0.5s ease, box-shadow 0.5s ease;
+        }
+        
+        .avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 15px 35px rgba(124, 58, 237, 0.2);
+        }
+        
+        .avatar-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .avatar-ring {
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            right: -6px;
+            bottom: -6px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            border-top-color: var(--accent-color);
+            animation: spin 8s infinite linear;
+        }
+        
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+        
+        .user-info {
+            text-align: center;
+            width: 100%;
+        }
+        
+        .user-name {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+        
+        .user-id {
+            font-size: 16px;
+            color: var(--text-secondary);
+            background-color: rgba(255, 255, 255, 0.05);
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+            border: 1px solid var(--border-color);
+        }
+        
+        .game-button {
+            display: block;
+            width: 100%;
+            background: linear-gradient(135deg, var(--accent-color), #5b21b6);
+            color: white;
+            border: none;
+            border-radius: 16px;
+            padding: 18px 24px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
+            letter-spacing: 0.5px;
+            box-shadow: 0 10px 20px rgba(124, 58, 237, 0.2);
+            margin-top: 10px;
+        }
+        
+        .game-button:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(124, 58, 237, 0.3);
+        }
+        
+        .game-button:active {
+            transform: translateY(-2px);
+        }
+        
+        .button-glow {
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            animation: slide-glow 3s infinite;
+        }
+        
+        @keyframes slide-glow {
+            0% {
+                left: -100%;
+            }
+            100% {
+                left: 100%;
+            }
+        }
+        
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 14px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .telegram-icon {
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.1);
+            }
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+            color: var(--accent-color);
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(124, 58, 237, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--accent-color);
+            animation: spin 1s infinite linear;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        
+        /* Адаптация под мобильные устройства */
+        @media (max-width: 600px) {
+            .container {
+                padding: 30px 20px;
+                border-radius: 20px;
+            }
+            
+            .header h1 {
+                font-size: 24px;
+            }
+            
+            .avatar {
+                width: 100px;
+                height: 100px;
+                font-size: 40px;
+            }
+            
+            .user-name {
+                font-size: 22px;
+            }
+            
+            .game-button {
+                padding: 16px 20px;
+                font-size: 16px;
+            }
+        }
+        
+        @media (max-width: 400px) {
+            .container {
+                padding: 25px 15px;
+            }
+            
+            .header h1 {
+                font-size: 22px;
+            }
+            
+            .avatar {
+                width: 90px;
+                height: 90px;
+                font-size: 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="bg-animation">
+            <div class="bg-particle"></div>
+            <div class="bg-particle"></div>
+            <div class="bg-particle"></div>
+        </div>
+        
+        <div class="header">
+            <h1>Игровой Профиль</h1>
+            <p>Ваша информация из Telegram</p>
+        </div>
+        
+        <div class="profile-section">
+            <div class="avatar-container">
+                <div class="avatar" id="userAvatar">
+                    <!-- Аватар будет загружен сюда -->
+                </div>
+                <div class="avatar-ring"></div>
+            </div>
+            
+            <div class="user-info">
+                <div class="user-name" id="userName">Загрузка...</div>
+                <div class="user-id" id="userId">ID: Загрузка...</div>
+            </div>
+        </div>
+        
+        <button class="game-button" id="startGameBtn">
+            <span class="button-glow"></span>
+            Начать игру
+        </button>
+        
+        <div class="loading" id="loading">
+            <div class="loading-spinner"></div>
+            Переход в бота...
+        </div>
+        
+        <div class="footer">
+            <div class="telegram-icon">📱</div>
+            <span>Запуск через Telegram</span>
+        </div>
+    </div>
+
+    <script>
+        // Инициализация приложения
+        document.addEventListener('DOMContentLoaded', function() {
+            // Телеграм WebApp API
+            const tg = window.Telegram?.WebApp;
+            
+            // Элементы DOM
+            const userAvatarEl = document.getElementById('userAvatar');
+            const userNameEl = document.getElementById('userName');
+            const userIdEl = document.getElementById('userId');
+            const startGameBtn = document.getElementById('startGameBtn');
+            const loadingEl = document.getElementById('loading');
+            
+            // Реферальная ссылка для бота
+            const BOT_REFERRAL_LINK = 'https://t.me/craft_demo_bot/start?startapp=RHIQLf4';
+            
+            // Данные пользователя (по умолчанию для демо)
+            let userData = {
+                firstName: 'Telegram',
+                lastName: 'User',
+                username: 'telegram_user',
+                userId: '123456789',
+                photoUrl: null
+            };
+            
+            // Если есть доступ к Telegram WebApp API
+            if (tg) {
+                tg.expand();
+                tg.ready();
+                
+                const tgUser = tg.initDataUnsafe?.user;
+                
+                if (tgUser) {
+                    userData = {
+                        firstName: tgUser.first_name || 'Имя',
+                        lastName: tgUser.last_name || '',
+                        username: tgUser.username || '',
+                        userId: tgUser.id.toString(),
+                        photoUrl: tgUser.photo_url
+                    };
+                }
+            } else {
+                // Демо-данные для локального тестирования
+                console.log('Telegram WebApp API не доступен. Используются демо-данные.');
+            }
+            
+            // Отображение данных пользователя
+            function displayUserData() {
+                // Имя и фамилия
+                const fullName = `${userData.firstName} ${userData.lastName}`.trim();
+                userNameEl.textContent = fullName || 'Пользователь Telegram';
+                
+                // ID пользователя
+                userIdEl.textContent = `ID: ${userData.userId}`;
+                
+                // Аватар
+                if (userData.photoUrl) {
+                    userAvatarEl.innerHTML = `<img src="${userData.photoUrl}" alt="Аватар" class="avatar-img">`;
+                } else {
+                    // Используем первую букву имени на цветном фоне
+                    const firstLetter = userData.firstName ? userData.firstName.charAt(0).toUpperCase() : 'T';
+                    const colors = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+                    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                    
+                    userAvatarEl.innerHTML = `<span>${firstLetter}</span>`;
+                    userAvatarEl.style.background = `linear-gradient(135deg, ${randomColor}, ${randomColor}80)`;
+                }
+            }
+            
+            // Обработчик клика по кнопке "Начать игру"
+            startGameBtn.addEventListener('click', function() {
+                // Показываем индикатор загрузки
+                loadingEl.style.display = 'block';
+                startGameBtn.disabled = true;
+                startGameBtn.style.opacity = '0.7';
+                
+                // Если в Telegram WebApp, используем его метод для открытия ссылки
+                if (tg) {
+                    tg.openTelegramLink(BOT_REFERRAL_LINK);
+                } else {
+                    // Иначе обычный переход по ссылке
+                    setTimeout(() => {
+                        window.open(BOT_REFERRAL_LINK, '_blank');
+                        
+                        // Скрываем индикатор загрузки через 3 секунды
+                        setTimeout(() => {
+                            loadingEl.style.display = 'none';
+                            startGameBtn.disabled = false;
+                            startGameBtn.style.opacity = '1';
+                        }, 3000);
+                    }, 1000);
+                }
+            });
+            
+            // Запрещаем подсветку элементов при взаимодействии
+            document.addEventListener('touchstart', function() {}, {passive: true});
+            document.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+            });
+            
+            // Инициализация приложения
+            displayUserData();
+            
+            // Анимация появления элементов
+            const elements = document.querySelectorAll('.container > *:not(.bg-animation)');
+            elements.forEach((el, index) => {
+                el.style.opacity = '0';
+                el.style.transform = 'translateY(20px)';
+                
+                setTimeout(() => {
+                    el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                    el.style.opacity = '1';
+                    el.style.transform = 'translateY(0)';
+                }, 100 + (index * 100));
+            });
+        });
+    </script>
+</body>
+</html>
